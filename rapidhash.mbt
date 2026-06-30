@@ -140,8 +140,12 @@ pub fn rapidhash(data : Bytes, seed? : UInt64 = 0) -> UInt64 {
         b = read32(data, p + len - 4)
       }
     } else if len > 0 {
-      a = (data[0].to_uint64() << 45) | data[len - 1].to_uint64()
-      b = data[len >> 1].to_uint64()
+      // 1 <= len <= 3 here, so indices 0, len-1, len>>1 are all in bounds;
+      // `unsafe_get` (a builtin intrinsic, portable across backends) skips the
+      // bounds check. The hot paths already read via `unsafe_read_*` / v128.
+      a = (data.unsafe_get(0).to_uint64() << 45) |
+        data.unsafe_get(len - 1).to_uint64()
+      b = data.unsafe_get(len >> 1).to_uint64()
     }
     // len == 0: a = b = 0.
   } else {
