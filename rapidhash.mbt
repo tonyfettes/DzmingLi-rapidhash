@@ -37,10 +37,22 @@ const S6 : UInt64 = 0x90ed1765281c388cUL
 const S7 : UInt64 = 0xaaaaaaaaaaaaaaaaUL
 
 ///|
-/// Full 64×64 → 128-bit product as `(lo, hi)`, schoolbook via 32-bit halves —
-/// exactly the reference's portable fallback (MoonBit has no `UInt128`). All
-/// arithmetic wraps mod 2⁶⁴.
-fn umul128(a : UInt64, b : UInt64) -> (UInt64, UInt64) {
+/// A pair of 64-bit words returned by value. `#valtype` keeps it stack-allocated
+/// on the native backend (no heap allocation, no refcount), so the hot loop's
+/// 128-bit products and 16-byte loads build nothing on the heap — unlike a
+/// tuple, which is a boxed object. On wasm/js the attribute is a no-op (ordinary
+/// struct, same as the old tuple). Internal only; absent from the public API.
+#valtype
+priv struct Pair {
+  a : UInt64
+  b : UInt64
+}
+
+///|
+/// Full 64×64 → 128-bit product as `Pair{a: lo, b: hi}`, schoolbook via 32-bit
+/// halves — exactly the reference's portable fallback (MoonBit has no
+/// `UInt128`). All arithmetic wraps mod 2⁶⁴.
+fn umul128(a : UInt64, b : UInt64) -> Pair {
   let ha = a >> 32
   let hb = b >> 32
   let la = a & 0xffffffff
@@ -54,15 +66,15 @@ fn umul128(a : UInt64, b : UInt64) -> (UInt64, UInt64) {
   let lo = t + (rm1 << 32)
   c = c + (if lo < t { 1 } else { 0 })
   let hi = rh + (rm0 >> 32) + (rm1 >> 32) + c
-  (lo, hi)
+  { a: lo, b: hi }
 }
 
 ///|
 /// `rapid_mix`: multiply-fold the two words (unprotected/FAST default = `A=lo,
 /// B=hi`), then xor the halves.
 fn mix(a : UInt64, b : UInt64) -> UInt64 {
-  let (lo, hi) = umul128(a, b)
-  lo ^ hi
+  let p = umul128(a, b)
+  p.a ^ p.b
 }
 
 ///|
@@ -77,16 +89,16 @@ fn read64(data : Bytes, p : Int) -> UInt64 {
 }
 
 ///|
-/// Two little-endian `UInt64`s from `data[p..p+16]`.
-fn read64x2(data : Bytes, p : Int) -> (UInt64, UInt64) {
+/// Two little-endian `UInt64`s from `data[p..p+16]` as `Pair{a, b}`.
+fn read64x2(data : Bytes, p : Int) -> Pair {
   let v = @v128.v128_load(bytes_as_fixedarray(data), p)
-  (@v128.i64x2_extract_lane(v, 0), @v128.i64x2_extract_lane(v, 1))
+  { a: @v128.i64x2_extract_lane(v, 0), b: @v128.i64x2_extract_lane(v, 1) }
 }
 
 ///|
 fn mix64x2(data : Bytes, p : Int, secret : UInt64, seed : UInt64) -> UInt64 {
-  let (a, b) = read64x2(data, p)
-  mix(a ^ secret, b ^ seed)
+  let pr = read64x2(data, p)
+  mix(pr.a ^ secret, pr.b ^ seed)
 }
 
 ///|
@@ -116,9 +128,9 @@ pub fn rapidhash(data : Bytes, seed? : UInt64 = 0) -> UInt64 {
       seed = seed ^ len.to_uint64()
       if len >= 8 {
         if len == 16 {
-          let (short_a, short_b) = read64x2(data, p)
-          a = short_a
-          b = short_b
+          let pr = read64x2(data, p)
+          a = pr.a
+          b = pr.b
         } else {
           a = read64(data, p)
           b = read64(data, p + len - 8)
@@ -194,14 +206,14 @@ pub fn rapidhash(data : Bytes, seed? : UInt64 = 0) -> UInt64 {
         }
       }
     }
-    let (last_a, last_b) = read64x2(data, p + i - 16)
-    a = last_a ^ i.to_uint64()
-    b = last_b
+    let pr = read64x2(data, p + i - 16)
+    a = pr.a ^ i.to_uint64()
+    b = pr.b
   }
   a = a ^ S1
   b = b ^ seed
-  let (lo, hi) = umul128(a, b)
-  mix(lo ^ S7, hi ^ S1 ^ i.to_uint64())
+  let prod = umul128(a, b)
+  mix(prod.a ^ S7, prod.b ^ S1 ^ i.to_uint64())
 }
 
 ///|

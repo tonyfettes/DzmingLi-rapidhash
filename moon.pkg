@@ -2,4 +2,8 @@ import {
   "moonbitlang/core/v128",
 }
 
+import {
+  "moonbitlang/core/bench",
+} for "test"
+
 warnings = "-alert_experimental"
