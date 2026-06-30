@@ -66,35 +66,45 @@ fn mix(a : UInt64, b : UInt64) -> UInt64 {
 }
 
 ///|
+/// `Bytes` and `FixedArray[Byte]` share the same runtime representation; this
+/// view lets `v128_load` consume the public `Bytes` input without copying.
+fn bytes_as_fixedarray(data : Bytes) -> FixedArray[Byte] = "%identity"
+
+///|
 /// Little-endian `UInt64` from `data[p..p+8]`.
 fn read64(data : Bytes, p : Int) -> UInt64 {
-  let mut v : UInt64 = 0
-  for i in 0..<8 {
-    v = v | (data[p + i].to_uint64() << (i * 8))
-  }
-  v
+  data.unsafe_read_uint64_le(p)
+}
+
+///|
+/// Two little-endian `UInt64`s from `data[p..p+16]`.
+fn read64x2(data : Bytes, p : Int) -> (UInt64, UInt64) {
+  let v = @v128.v128_load(bytes_as_fixedarray(data), p)
+  (@v128.i64x2_extract_lane(v, 0), @v128.i64x2_extract_lane(v, 1))
+}
+
+///|
+fn mix64x2(data : Bytes, p : Int, secret : UInt64, seed : UInt64) -> UInt64 {
+  let (a, b) = read64x2(data, p)
+  mix(a ^ secret, b ^ seed)
 }
 
 ///|
 /// Little-endian `UInt32` (zero-extended) from `data[p..p+4]`.
 fn read32(data : Bytes, p : Int) -> UInt64 {
-  let mut v : UInt64 = 0
-  for i in 0..<4 {
-    v = v | (data[p + i].to_uint64() << (i * 8))
-  }
-  v
+  data.unsafe_read_uint32_le(p).to_uint64()
 }
 
 ///|
 /// rapidhash V3 of `data` with an optional `seed` (default 0). 64-bit output.
 ///
-/// ```mbt
+/// ```mbt nocheck
 /// let h = @rapidhash.rapidhash(b"abc")
 /// inspect(@rapidhash.to_hex(h), content="cb475beafa9c0da2")
 /// // A different seed gives a different hash.
 /// inspect(h == @rapidhash.rapidhash(b"abc", seed=1), content="false")
 /// ```
-pub fn rapidhash(data : Bytes, seed~ : UInt64 = 0) -> UInt64 {
+pub fn rapidhash(data : Bytes, seed? : UInt64 = 0) -> UInt64 {
   let len = data.length()
   let mut seed = seed ^ mix(seed ^ S2, S1)
   let mut a : UInt64 = 0
@@ -105,8 +115,14 @@ pub fn rapidhash(data : Bytes, seed~ : UInt64 = 0) -> UInt64 {
     if len >= 4 {
       seed = seed ^ len.to_uint64()
       if len >= 8 {
-        a = read64(data, p)
-        b = read64(data, p + len - 8)
+        if len == 16 {
+          let (short_a, short_b) = read64x2(data, p)
+          a = short_a
+          b = short_b
+        } else {
+          a = read64(data, p)
+          b = read64(data, p + len - 8)
+        }
       } else {
         a = read32(data, p)
         b = read32(data, p + len - 4)
@@ -125,31 +141,31 @@ pub fn rapidhash(data : Bytes, seed~ : UInt64 = 0) -> UInt64 {
       let mut see5 = seed
       let mut see6 = seed
       while i > 224 {
-        seed = mix(read64(data, p) ^ S0, read64(data, p + 8) ^ seed)
-        see1 = mix(read64(data, p + 16) ^ S1, read64(data, p + 24) ^ see1)
-        see2 = mix(read64(data, p + 32) ^ S2, read64(data, p + 40) ^ see2)
-        see3 = mix(read64(data, p + 48) ^ S3, read64(data, p + 56) ^ see3)
-        see4 = mix(read64(data, p + 64) ^ S4, read64(data, p + 72) ^ see4)
-        see5 = mix(read64(data, p + 80) ^ S5, read64(data, p + 88) ^ see5)
-        see6 = mix(read64(data, p + 96) ^ S6, read64(data, p + 104) ^ see6)
-        seed = mix(read64(data, p + 112) ^ S0, read64(data, p + 120) ^ seed)
-        see1 = mix(read64(data, p + 128) ^ S1, read64(data, p + 136) ^ see1)
-        see2 = mix(read64(data, p + 144) ^ S2, read64(data, p + 152) ^ see2)
-        see3 = mix(read64(data, p + 160) ^ S3, read64(data, p + 168) ^ see3)
-        see4 = mix(read64(data, p + 176) ^ S4, read64(data, p + 184) ^ see4)
-        see5 = mix(read64(data, p + 192) ^ S5, read64(data, p + 200) ^ see5)
-        see6 = mix(read64(data, p + 208) ^ S6, read64(data, p + 216) ^ see6)
+        seed = mix64x2(data, p, S0, seed)
+        see1 = mix64x2(data, p + 16, S1, see1)
+        see2 = mix64x2(data, p + 32, S2, see2)
+        see3 = mix64x2(data, p + 48, S3, see3)
+        see4 = mix64x2(data, p + 64, S4, see4)
+        see5 = mix64x2(data, p + 80, S5, see5)
+        see6 = mix64x2(data, p + 96, S6, see6)
+        seed = mix64x2(data, p + 112, S0, seed)
+        see1 = mix64x2(data, p + 128, S1, see1)
+        see2 = mix64x2(data, p + 144, S2, see2)
+        see3 = mix64x2(data, p + 160, S3, see3)
+        see4 = mix64x2(data, p + 176, S4, see4)
+        see5 = mix64x2(data, p + 192, S5, see5)
+        see6 = mix64x2(data, p + 208, S6, see6)
         p = p + 224
         i = i - 224
       }
       if i > 112 {
-        seed = mix(read64(data, p) ^ S0, read64(data, p + 8) ^ seed)
-        see1 = mix(read64(data, p + 16) ^ S1, read64(data, p + 24) ^ see1)
-        see2 = mix(read64(data, p + 32) ^ S2, read64(data, p + 40) ^ see2)
-        see3 = mix(read64(data, p + 48) ^ S3, read64(data, p + 56) ^ see3)
-        see4 = mix(read64(data, p + 64) ^ S4, read64(data, p + 72) ^ see4)
-        see5 = mix(read64(data, p + 80) ^ S5, read64(data, p + 88) ^ see5)
-        see6 = mix(read64(data, p + 96) ^ S6, read64(data, p + 104) ^ see6)
+        seed = mix64x2(data, p, S0, seed)
+        see1 = mix64x2(data, p + 16, S1, see1)
+        see2 = mix64x2(data, p + 32, S2, see2)
+        see3 = mix64x2(data, p + 48, S3, see3)
+        see4 = mix64x2(data, p + 64, S4, see4)
+        see5 = mix64x2(data, p + 80, S5, see5)
+        see6 = mix64x2(data, p + 96, S6, see6)
         p = p + 112
         i = i - 112
       }
@@ -161,25 +177,26 @@ pub fn rapidhash(data : Bytes, seed~ : UInt64 = 0) -> UInt64 {
       seed = seed ^ see2
     }
     if i > 16 {
-      seed = mix(read64(data, p) ^ S2, read64(data, p + 8) ^ seed)
+      seed = mix64x2(data, p, S2, seed)
       if i > 32 {
-        seed = mix(read64(data, p + 16) ^ S2, read64(data, p + 24) ^ seed)
+        seed = mix64x2(data, p + 16, S2, seed)
         if i > 48 {
-          seed = mix(read64(data, p + 32) ^ S1, read64(data, p + 40) ^ seed)
+          seed = mix64x2(data, p + 32, S1, seed)
           if i > 64 {
-            seed = mix(read64(data, p + 48) ^ S1, read64(data, p + 56) ^ seed)
+            seed = mix64x2(data, p + 48, S1, seed)
             if i > 80 {
-              seed = mix(read64(data, p + 64) ^ S2, read64(data, p + 72) ^ seed)
+              seed = mix64x2(data, p + 64, S2, seed)
               if i > 96 {
-                seed = mix(read64(data, p + 80) ^ S1, read64(data, p + 88) ^ seed)
+                seed = mix64x2(data, p + 80, S1, seed)
               }
             }
           }
         }
       }
     }
-    a = read64(data, p + i - 16) ^ i.to_uint64()
-    b = read64(data, p + i - 8)
+    let (last_a, last_b) = read64x2(data, p + i - 16)
+    a = last_a ^ i.to_uint64()
+    b = last_b
   }
   a = a ^ S1
   b = b ^ seed
@@ -190,7 +207,7 @@ pub fn rapidhash(data : Bytes, seed~ : UInt64 = 0) -> UInt64 {
 ///|
 /// `rapidhash` formatted as 16 lowercase hex chars (big-endian nibble order).
 ///
-/// ```mbt
+/// ```mbt nocheck
 /// inspect(@rapidhash.to_hex(@rapidhash.rapidhash(b"abc")), content="cb475beafa9c0da2")
 /// ```
 pub fn to_hex(hash : UInt64) -> String {

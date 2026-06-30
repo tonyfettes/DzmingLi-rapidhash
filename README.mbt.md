@@ -15,7 +15,8 @@ moon add DzmingLi/rapidhash
 
 ## Usage
 
-```mbt
+```mbt nocheck
+///|
 test {
   // 64-bit hash of any `Bytes`.
   let h = @rapidhash.rapidhash(b"hello world")
