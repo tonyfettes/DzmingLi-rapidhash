@@ -49,9 +49,17 @@ priv struct Pair {
 }
 
 ///|
-/// Full 64×64 → 128-bit product as `Pair{a: lo, b: hi}`, schoolbook via 32-bit
-/// halves — exactly the reference's portable fallback (MoonBit has no
-/// `UInt128`). All arithmetic wraps mod 2⁶⁴.
+/// Full 64×64 → 128-bit product as `Pair{a: lo, b: hi}`.
+///
+/// On release native builds the compiler lowers this to the machine's native
+/// 128-bit multiply via the `%u64.mul_wide` intrinsic — `mul`+`umulh` on arm64,
+/// a single `mulq` on x86-64 (the C runtime helper uses `__int128`). Debug
+/// builds and the js/wasm backends do not lower `Mul_wide` yet
+/// ("mul_wide is not supported by the machine backend yet"), so they silently
+/// run the schoolbook body below — the reference's portable fallback, exact and
+/// portable, and the correctness backstop for every backend. Field order
+/// `a=lo, b=hi` matches the intrinsic's positional write.
+#intrinsic("%u64.mul_wide")
 fn umul128(a : UInt64, b : UInt64) -> Pair {
   let ha = a >> 32
   let hb = b >> 32

@@ -4,6 +4,8 @@ import {
 
 import {
   "moonbitlang/core/bench",
+  "DzmingLi/rapidhash/xxh64",
+  "DzmingLi/rapidhash/highwayhash",
 } for "test"
 
 warnings = "-alert_experimental"
