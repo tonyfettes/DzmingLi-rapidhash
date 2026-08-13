@@ -86,11 +86,6 @@ fn mix(a : UInt64, b : UInt64) -> UInt64 {
 }
 
 ///|
-/// `Bytes` and `FixedArray[Byte]` share the same runtime representation; this
-/// view lets `v128_load` consume the public `Bytes` input without copying.
-fn bytes_as_fixedarray(data : Bytes) -> FixedArray[Byte] = "%identity"
-
-///|
 /// Little-endian `UInt64` from `data[p..p+8]`.
 fn read64(data : Bytes, p : Int) -> UInt64 {
   data.unsafe_read_uint64_le(p)
@@ -98,9 +93,15 @@ fn read64(data : Bytes, p : Int) -> UInt64 {
 
 ///|
 /// Two little-endian `UInt64`s from `data[p..p+16]` as `Pair{a, b}`.
+///
+/// Implemented as two adjacent `unsafe_read_uint64_le` (each lowers to a
+/// single unaligned 64-bit load) instead of a `v128_load` + lane extracts:
+/// on arm64 the v128 round-trip costs `ldr q` + `mov.d` + `fmov` per 16 B
+/// and pushes the hot loop's register pressure (spills, in-loop constant
+/// rematerialization); the two scalar loads go straight into GPRs and the C
+/// backend merges them into a single `ldp` pair load.
 fn read64x2(data : Bytes, p : Int) -> Pair {
-  let v = @v128.v128_load(bytes_as_fixedarray(data), p)
-  { a: @v128.i64x2_extract_lane(v, 0), b: @v128.i64x2_extract_lane(v, 1) }
+  { a: data.unsafe_read_uint64_le(p), b: data.unsafe_read_uint64_le(p + 8) }
 }
 
 ///|

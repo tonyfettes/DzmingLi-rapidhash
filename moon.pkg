@@ -1,8 +1,4 @@
 import {
-  "moonbitlang/core/v128",
-}
-
-import {
   "moonbitlang/core/bench",
   "DzmingLi/rapidhash/xxh64",
   "DzmingLi/rapidhash/highwayhash",
