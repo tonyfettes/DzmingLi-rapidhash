@@ -1,5 +1,1 @@
-import {
-  "moonbitlang/core/bench",
-} for "test"
-
 warnings = "-alert_experimental"

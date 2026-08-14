@@ -30,13 +30,9 @@ test {
 
 ## Benchmarks
 
-```bash
-moon bench --target native --release
-```
-
-The harness mirrors the upstream reference bench (itself the xxHash bench
-tool): a serial-dependency **latency** chain for small keys and back-to-back
-**throughput** over large buffers, with the same PRNG-filled input.
+Cross-implementation latency and throughput benchmarks live in
+[tonyfettes/hash-benchmarks](https://github.com/tonyfettes/hash-benchmarks).
+This module keeps correctness tests alongside the implementation.
 
 ## Notes
 
