@@ -43,13 +43,13 @@ const S7 : UInt64 = 0xaaaaaaaaaaaaaaaaUL
 /// tuple, which is a boxed object. On wasm/js the attribute is a no-op (ordinary
 /// struct, same as the old tuple). Internal only; absent from the public API.
 #valtype
-priv struct Pair {
+priv struct Int64x2 {
   a : UInt64
   b : UInt64
 }
 
 ///|
-/// Full 64×64 → 128-bit product as `Pair{a: lo, b: hi}`.
+/// Full 64×64 → 128-bit product as `Int64x2{a: lo, b: hi}`.
 ///
 /// On release native builds the compiler lowers this to the machine's native
 /// 128-bit multiply via the `%u64.mul_wide` intrinsic — `mul`+`umulh` on arm64,
@@ -60,7 +60,7 @@ priv struct Pair {
 /// portable, and the correctness backstop for every backend. Field order
 /// `a=lo, b=hi` matches the intrinsic's positional write.
 #intrinsic("%u64.mul_wide")
-fn umul128(a : UInt64, b : UInt64) -> Pair {
+fn umul128(a : UInt64, b : UInt64) -> Int64x2 {
   let ha = a >> 32
   let hb = b >> 32
   let la = a & 0xffffffff
@@ -92,7 +92,7 @@ fn read64(data : Bytes, p : Int) -> UInt64 {
 }
 
 ///|
-/// Two little-endian `UInt64`s from `data[p..p+16]` as `Pair{a, b}`.
+/// Two little-endian `UInt64`s from `data[p..p+16]` as `Int64x2{a, b}`.
 ///
 /// Implemented as two adjacent `unsafe_read_uint64_le` (each lowers to a
 /// single unaligned 64-bit load) instead of a `v128_load` + lane extracts:
@@ -100,7 +100,7 @@ fn read64(data : Bytes, p : Int) -> UInt64 {
 /// and pushes the hot loop's register pressure (spills, in-loop constant
 /// rematerialization); the two scalar loads go straight into GPRs and the C
 /// backend merges them into a single `ldp` pair load.
-fn read64x2(data : Bytes, p : Int) -> Pair {
+fn read64x2(data : Bytes, p : Int) -> Int64x2 {
   { a: data.unsafe_read_uint64_le(p), b: data.unsafe_read_uint64_le(p + 8) }
 }
 
@@ -230,13 +230,17 @@ pub fn rapidhash(data : Bytes, seed? : UInt64 = 0) -> UInt64 {
 }
 
 ///|
+let hexchars : FixedArray[Char] = [
+  '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f',
+]
+
+///|
 /// `rapidhash` formatted as 16 lowercase hex chars (big-endian nibble order).
 ///
 /// ```mbt nocheck
 /// inspect(@rapidhash.to_hex(@rapidhash.rapidhash(b"abc")), content="cb475beafa9c0da2")
 /// ```
 pub fn to_hex(hash : UInt64) -> String {
-  let hexchars = "0123456789abcdef".to_array()
   let buf = StringBuilder::new()
   for k in 0..<16 {
     buf.write_char(hexchars[((hash >> ((15 - k) * 4)) & 0xF).to_int()])
