@@ -37,10 +37,30 @@ const S6 : UInt64 = 0x90ed1765281c388cUL
 const S7 : UInt64 = 0xaaaaaaaaaaaaaaaaUL
 
 ///|
-/// Full 64×64 → 128-bit product as `(lo, hi)`, schoolbook via 32-bit halves —
-/// exactly the reference's portable fallback (MoonBit has no `UInt128`). All
-/// arithmetic wraps mod 2⁶⁴.
-fn umul128(a : UInt64, b : UInt64) -> (UInt64, UInt64) {
+/// A pair of 64-bit words returned by value. `#valtype` keeps it stack-allocated
+/// on the native backend (no heap allocation, no refcount), so the hot loop's
+/// 128-bit products and 16-byte loads build nothing on the heap — unlike a
+/// tuple, which is a boxed object. On wasm/js the attribute is a no-op (ordinary
+/// struct, same as the old tuple). Internal only; absent from the public API.
+#valtype
+priv struct Int64x2 {
+  a : UInt64
+  b : UInt64
+}
+
+///|
+/// Full 64×64 → 128-bit product as `Int64x2{a: lo, b: hi}`.
+///
+/// On release native builds the compiler lowers this to the machine's native
+/// 128-bit multiply via the `%u64.mul_wide` intrinsic — `mul`+`umulh` on arm64,
+/// a single `mulq` on x86-64 (the C runtime helper uses `__int128`). Debug
+/// builds and the js/wasm backends do not lower `Mul_wide` yet
+/// ("mul_wide is not supported by the machine backend yet"), so they silently
+/// run the schoolbook body below — the reference's portable fallback, exact and
+/// portable, and the correctness backstop for every backend. Field order
+/// `a=lo, b=hi` matches the intrinsic's positional write.
+#intrinsic("%u64.mul_wide")
+fn umul128(a : UInt64, b : UInt64) -> Int64x2 {
   let ha = a >> 32
   let hb = b >> 32
   let la = a & 0xffffffff
@@ -54,21 +74,16 @@ fn umul128(a : UInt64, b : UInt64) -> (UInt64, UInt64) {
   let lo = t + (rm1 << 32)
   c = c + (if lo < t { 1 } else { 0 })
   let hi = rh + (rm0 >> 32) + (rm1 >> 32) + c
-  (lo, hi)
+  { a: lo, b: hi }
 }
 
 ///|
 /// `rapid_mix`: multiply-fold the two words (unprotected/FAST default = `A=lo,
 /// B=hi`), then xor the halves.
 fn mix(a : UInt64, b : UInt64) -> UInt64 {
-  let (lo, hi) = umul128(a, b)
-  lo ^ hi
+  let p = umul128(a, b)
+  p.a ^ p.b
 }
-
-///|
-/// `Bytes` and `FixedArray[Byte]` share the same runtime representation; this
-/// view lets `v128_load` consume the public `Bytes` input without copying.
-fn bytes_as_fixedarray(data : Bytes) -> FixedArray[Byte] = "%identity"
 
 ///|
 /// Little-endian `UInt64` from `data[p..p+8]`.
@@ -77,16 +92,22 @@ fn read64(data : Bytes, p : Int) -> UInt64 {
 }
 
 ///|
-/// Two little-endian `UInt64`s from `data[p..p+16]`.
-fn read64x2(data : Bytes, p : Int) -> (UInt64, UInt64) {
-  let v = @v128.v128_load(bytes_as_fixedarray(data), p)
-  (@v128.i64x2_extract_lane(v, 0), @v128.i64x2_extract_lane(v, 1))
+/// Two little-endian `UInt64`s from `data[p..p+16]` as `Int64x2{a, b}`.
+///
+/// Implemented as two adjacent `unsafe_read_uint64_le` (each lowers to a
+/// single unaligned 64-bit load) instead of a `v128_load` + lane extracts:
+/// on arm64 the v128 round-trip costs `ldr q` + `mov.d` + `fmov` per 16 B
+/// and pushes the hot loop's register pressure (spills, in-loop constant
+/// rematerialization); the two scalar loads go straight into GPRs and the C
+/// backend merges them into a single `ldp` pair load.
+fn read64x2(data : Bytes, p : Int) -> Int64x2 {
+  { a: data.unsafe_read_uint64_le(p), b: data.unsafe_read_uint64_le(p + 8) }
 }
 
 ///|
 fn mix64x2(data : Bytes, p : Int, secret : UInt64, seed : UInt64) -> UInt64 {
-  let (a, b) = read64x2(data, p)
-  mix(a ^ secret, b ^ seed)
+  let pr = read64x2(data, p)
+  mix(pr.a ^ secret, pr.b ^ seed)
 }
 
 ///|
@@ -116,9 +137,9 @@ pub fn rapidhash(data : Bytes, seed? : UInt64 = 0) -> UInt64 {
       seed = seed ^ len.to_uint64()
       if len >= 8 {
         if len == 16 {
-          let (short_a, short_b) = read64x2(data, p)
-          a = short_a
-          b = short_b
+          let pr = read64x2(data, p)
+          a = pr.a
+          b = pr.b
         } else {
           a = read64(data, p)
           b = read64(data, p + len - 8)
@@ -128,8 +149,12 @@ pub fn rapidhash(data : Bytes, seed? : UInt64 = 0) -> UInt64 {
         b = read32(data, p + len - 4)
       }
     } else if len > 0 {
-      a = (data[0].to_uint64() << 45) | data[len - 1].to_uint64()
-      b = data[len >> 1].to_uint64()
+      // 1 <= len <= 3 here, so indices 0, len-1, len>>1 are all in bounds;
+      // `unsafe_get` (a builtin intrinsic, portable across backends) skips the
+      // bounds check. The hot paths already read via `unsafe_read_*` / v128.
+      a = (data.unsafe_get(0).to_uint64() << 45) |
+        data.unsafe_get(len - 1).to_uint64()
+      b = data.unsafe_get(len >> 1).to_uint64()
     }
     // len == 0: a = b = 0.
   } else {
@@ -194,15 +219,20 @@ pub fn rapidhash(data : Bytes, seed? : UInt64 = 0) -> UInt64 {
         }
       }
     }
-    let (last_a, last_b) = read64x2(data, p + i - 16)
-    a = last_a ^ i.to_uint64()
-    b = last_b
+    let pr = read64x2(data, p + i - 16)
+    a = pr.a ^ i.to_uint64()
+    b = pr.b
   }
   a = a ^ S1
   b = b ^ seed
-  let (lo, hi) = umul128(a, b)
-  mix(lo ^ S7, hi ^ S1 ^ i.to_uint64())
+  let prod = umul128(a, b)
+  mix(prod.a ^ S7, prod.b ^ S1 ^ i.to_uint64())
 }
+
+///|
+let hexchars : FixedArray[Char] = [
+  '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f',
+]
 
 ///|
 /// `rapidhash` formatted as 16 lowercase hex chars (big-endian nibble order).
@@ -211,7 +241,6 @@ pub fn rapidhash(data : Bytes, seed? : UInt64 = 0) -> UInt64 {
 /// inspect(@rapidhash.to_hex(@rapidhash.rapidhash(b"abc")), content="cb475beafa9c0da2")
 /// ```
 pub fn to_hex(hash : UInt64) -> String {
-  let hexchars = "0123456789abcdef".to_array()
   let buf = StringBuilder::new()
   for k in 0..<16 {
     buf.write_char(hexchars[((hash >> ((15 - k) * 4)) & 0xF).to_int()])
