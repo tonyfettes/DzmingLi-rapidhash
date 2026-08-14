@@ -1,4 +1,4 @@
-# DzmingLi/rapidhash
+# tonyfettes/rapidhash
 
 A faithful MoonBit port of [**rapidhash V3**](https://github.com/Nicoshev/rapidhash) —
 a very fast, high-quality, **non-cryptographic** 64-bit hash. rapidhash is the
@@ -10,12 +10,12 @@ Use it for hash maps, content keys, checksums, and dedup — **not** for securit
 ## Install
 
 ```bash
-moon add DzmingLi/rapidhash
+moon add tonyfettes/rapidhash
 ```
 
 ## Usage
 
-```mbt nocheck
+```moonbit nocheck
 ///|
 test {
   // 64-bit hash of any `Bytes`.
@@ -28,13 +28,28 @@ test {
 }
 ```
 
+## Benchmarks
+
+```bash
+moon bench --target native --release
+```
+
+The harness mirrors the upstream reference bench (itself the xxHash bench
+tool): a serial-dependency **latency** chain for small keys and back-to-back
+**throughput** over large buffers, with the same PRNG-filled input. The
+`xxh64` and `highwayhash` subpackages are ports of those hashes used as
+comparison baselines.
+
 ## Notes
 
 - **64-bit output**, little-endian reads — bit-for-bit compatible with the
   reference C (and any other conformant rapidhash V3), validated against
   reference-generated known-answer vectors across every input-length class.
 - **Pure MoonBit**, no FFI, no dependencies, all backends.
-- The 64×64→128 multiply uses a portable 32-bit-split `umul128` (MoonBit has no
-  `UInt128`), matching the reference's fallback path.
+- The 64×64→128 multiply (`rapid_mum`) lowers to the machine's native wide
+  multiply on release native builds via the `%u64.mul_wide` intrinsic — a
+  single `mulq` on x86-64, `mul`+`umulh` on arm64. Debug builds and the
+  js/wasm backends run a portable 32-bit-split `umul128` (MoonBit has no
+  `UInt128`), matching the reference's portable fallback.
 - Non-cryptographic: do not use where collision resistance against an adversary
   matters.

@@ -1,5 +1,5 @@
 // Generated using `moon info`, DON'T EDIT IT
-package "DzmingLi/rapidhash"
+package "tonyfettes/rapidhash"
 
 // Values
 pub fn rapidhash(Bytes, seed? : UInt64) -> UInt64

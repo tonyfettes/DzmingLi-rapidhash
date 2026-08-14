@@ -1,5 +1,5 @@
 // Generated using `moon info`, DON'T EDIT IT
-package "DzmingLi/rapidhash/xxh64"
+package "tonyfettes/rapidhash/xxh64"
 
 // Values
 pub fn to_hex(UInt64) -> String
