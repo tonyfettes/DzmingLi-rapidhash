@@ -1,7 +1,5 @@
 import {
   "moonbitlang/core/bench",
-  "tonyfettes/rapidhash/xxh64",
-  "tonyfettes/rapidhash/highwayhash",
 } for "test"
 
 warnings = "-alert_experimental"

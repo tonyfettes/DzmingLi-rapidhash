@@ -4,7 +4,7 @@ version = "0.1.3"
 
 readme = "README.mbt.md"
 
-repository = "https://github.com/DzmingLi/rapidhash"
+repository = "https://github.com/tonyfettes/rapidhash"
 
 license = "MIT"
 

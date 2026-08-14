@@ -15,7 +15,7 @@ moon add tonyfettes/rapidhash
 
 ## Usage
 
-```moonbit nocheck
+```mbt nocheck
 ///|
 test {
   // 64-bit hash of any `Bytes`.
@@ -36,9 +36,7 @@ moon bench --target native --release
 
 The harness mirrors the upstream reference bench (itself the xxHash bench
 tool): a serial-dependency **latency** chain for small keys and back-to-back
-**throughput** over large buffers, with the same PRNG-filled input. The
-`xxh64` and `highwayhash` subpackages are ports of those hashes used as
-comparison baselines.
+**throughput** over large buffers, with the same PRNG-filled input.
 
 ## Notes
 

@@ -76,23 +76,3 @@ test (b : @bench.T) {
     })
   }
 }
-
-///|
-/// rapidhash vs XXH64, same data and harness. rapidhash's `mum` needs the high
-/// 64 bits of a 64×64 product; on release native this is now the compiler's
-/// `%u64.mul_wide` intrinsic (`mul`+`umulh` on arm64, `mulq` on x86-64) instead
-/// of the portable schoolbook (~13 instr), while XXH64 uses only low-64
-/// multiplies (a single `mul`). This measures whether the widened multiply
-/// keeps rapidhash competitive with XXH64 in pure MoonBit.
-test (b : @bench.T) {
-  for size in [16, 64, 1024, 65536, 1048576] {
-    let buf = init_buffer(size)
-    b.bench(name="rapidhash   len=\{size}", fn() {
-      b.keep(@rapidhash.rapidhash(buf))
-    })
-    b.bench(name="xxh64       len=\{size}", fn() { b.keep(@xxh64.xxh64(buf)) })
-    b.bench(name="highwayhash len=\{size}", fn() {
-      b.keep(@highwayhash.highwayhash64(buf))
-    })
-  }
-}
