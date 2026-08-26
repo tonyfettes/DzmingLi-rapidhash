@@ -241,7 +241,7 @@ let hexchars : FixedArray[Char] = [
 /// inspect(@rapidhash.to_hex(@rapidhash.rapidhash(b"abc")), content="cb475beafa9c0da2")
 /// ```
 pub fn to_hex(hash : UInt64) -> String {
-  let buf = StringBuilder::new()
+  let buf = StringBuilder()
   for k in 0..<16 {
     buf.write_char(hexchars[((hash >> ((15 - k) * 4)) & 0xF).to_int()])
   }
